@@ -3,16 +3,6 @@ import { ollama } from './utils/ollama';
 import { updateElo, saveSession } from './utils/storage';
 import { PROMPT_LIBRARY } from './types';
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-});
-
-const models: string[] = [];
-let selectedModels: string[] = [];
-let blindMode = false;
-let promptIndex = 0;
-
 const c = {
   reset: '\x1b[0m',
   bold: '\x1b[1m',
@@ -26,6 +16,35 @@ const c = {
   gray: '\x1b[90m',
   black: '\x1b[30m',
 };
+
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+});
+
+// Enable Ctrl+Q to quit
+readline.emitKeypressEvents(process.stdin);
+if (process.stdin.isTTY) {
+  process.stdin.setRawMode(true);
+}
+
+process.stdin.on('keypress', (_str, key) => {
+  if (key.ctrl && key.name === 'q') {
+    console.log(`\n${c.gray}Goodbye!${c.reset}`);
+    rl.close();
+    process.exit(0);
+  }
+  if (key.ctrl && key.name === 'c') {
+    console.log(`\n${c.gray}Goodbye!${c.reset}`);
+    rl.close();
+    process.exit(0);
+  }
+});
+
+const models: string[] = [];
+let selectedModels: string[] = [];
+let blindMode = false;
+let promptIndex = 0;
 
 function clear(): void {
   console.clear();
