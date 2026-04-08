@@ -1,0 +1,38 @@
+{
+  "name": "@12britz/llmarena",
+  "version": "1.0.0",
+  "description": "Local LLM Arena - Compare local models side-by-side with blind evaluation and Elo rankings",
+  "main": "dist/main.js",
+  "bin": {
+    "llmarena": "./dist/main.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "dev": "tsc && node dist/main.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "cli",
+    "llm",
+    "ollama",
+    "arena",
+    "benchmark",
+    "ai",
+    "local"
+  ],
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "commander": "^11.1.0",
+    "inquirer": "^8.2.5"
+  },
+  "devDependencies": {
+    "@types/inquirer": "^8.2.10",
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.2"
+  }
+}
