@@ -74,8 +74,11 @@ async function listModels(): Promise<void> {
   
   const available = await ollama.listModels();
   models.length = 0;
-  models.push(...available.map(m => m.name));
+  // Sort by size (smallest first)
+  const sorted = available.sort((a: any, b: any) => a.size - b.size);
+  models.push(...sorted.map((m: any) => m.name));
   
+  // Select smallest 2 models by default
   if (models.length >= 2) {
     selectedModels = [models[0], models[1]];
   }
