@@ -1,16 +1,18 @@
 # Local LLM Arena
 
-A beautiful CLI tool for comparing local LLM models side-by-side, inspired by LLM Arena. Features blind evaluation, voting, and Elo rankings.
+A beautiful **TUI (Terminal User Interface)** for comparing local LLM models side-by-side, inspired by LLM Arena. Features interactive chat-like experience, blind evaluation, voting, and Elo rankings.
+
+![LLM Arena Demo](https://via.placeholder.com/800x400?text=Local+LLM+Arena+TUI)
 
 ## Features
 
-- **Arena Mode**: Submit a prompt and see responses from multiple models simultaneously
-- **Blind Evaluation**: Hide model names to eliminate bias and judge purely on output quality
-- **Voting System**: Vote for the best response and track your preferences
-- **Elo Rankings**: Track model performance over time with Elo ratings
-- **Categories**: Pre-built prompts for code, math, reasoning, creative, and general tasks
-- **Leaderboard**: View and compare model rankings
-- **Beautiful UI**: Rich terminal output matching sysview aesthetic
+- **Interactive TUI**: Chat-like interface for comparing models
+- **Real-time Streaming**: Watch model responses as they're generated
+- **Blind Evaluation**: Hide model names to eliminate bias
+- **Voting System**: Vote for the best response
+- **Elo Rankings**: Track model performance over time
+- **Keyboard Shortcuts**: Full keyboard navigation
+- **Multi-model Comparison**: Compare 2-6 models simultaneously
 
 ## Prerequisites
 
@@ -30,74 +32,53 @@ npm install
 # Build
 npm run build
 
-# Link globally (optional)
+# Link globally
 npm link
 ```
 
-## Usage
+## Quick Start
 
-### List Available Models
 ```bash
+# Start the TUI
+llmarena start
+
+# List available models
 llmarena list
-```
 
-### Start Arena Mode
-```bash
-llmarena arena
-```
-
-### Arena with Specific Models
-```bash
-llmarena arena -m llama3.2 qwen2.5 mistral
-```
-
-### Arena with Blind Evaluation
-```bash
-llmarena arena --blind
-```
-
-### Arena with Category
-```bash
-llmarena arena -c code
-```
-
-### Run a Custom Prompt
-```bash
-llmarena run "Write a fibonacci function in Python" -m llama3.2 qwen2.5
-```
-
-### View Leaderboard
-```bash
+# View leaderboard
 llmarena leaderboard
 ```
 
-## Commands
+## TUI Controls
 
-| Command | Description |
-|---------|-------------|
-| `llmarena arena` | Start interactive arena mode |
-| `llmarena arena -m <models>` | Arena with specific models |
-| `llmarena arena --blind` | Arena with hidden model names |
-| `llmarena arena -c <category>` | Arena with specific category |
-| `llmarena run <prompt>` | Run prompt across models |
-| `llmarena leaderboard` | View Elo rankings |
-| `llmarena list` | List available Ollama models |
+| Key | Action |
+|-----|--------|
+| `Click` | Toggle model selection |
+| `Enter` | Run arena with selected models |
+| `A/B/C` | Vote for model A/B/C |
+| `T` | Record a tie |
+| `N` | Next prompt |
+| `R` | Regenerate responses |
+| `B` | Toggle blind mode |
+| `Q` / `Esc` | Quit |
 
-## Categories
+## How to Use
 
-- `code` - Coding challenges and tasks
-- `math` - Math problems
-- `reasoning` - Logic puzzles
-- `creative` - Writing tasks
-- `general` - General questions
+1. **Start**: Run `llmarena start`
+2. **Select Models**: Click on models in the left panel (or they'll auto-select)
+3. **Enter Prompt**: Type your prompt in the bottom input box
+4. **Press Enter**: Watch models generate responses in real-time
+5. **Vote**: Press A, B, C etc. to vote for the best response
+6. **Repeat**: Press N for next prompt, R to regenerate
 
-## How It Works
+## Keyboard Shortcuts
 
-1. **Select Models**: Choose 2-6 models to compare
-2. **Choose Prompt**: Pick from library categories or enter custom
-3. **View Responses**: See all models' responses side-by-side
-4. **Vote**: Choose the best response (blind or revealed)
-5. **Track Progress**: Elo ratings update based on your votes
+- **A/B/C/D/E/F**: Vote for corresponding model
+- **T**: Tie
+- **N**: Next prompt from library
+- **R**: Regenerate all responses
+- **B**: Toggle blind mode (hide/show model names)
+- **Q / Esc**: Quit
 
 ## Data Storage
 
@@ -105,6 +86,28 @@ Elo ratings and session history are stored in:
 - `~/.llmarena/sessions.json`
 - `~/.llmarena/votes.json`
 - `~/.llmarena/elo.json`
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Local LLM Arena TUI                      │
+├──────────────┬────────────────────────────────────────────┤
+│   Models     │              Response Panels                │
+│   Sidebar    │  ┌──────────────────────────────────────┐  │
+│              │  │ [A] Model A                          │  │
+│  [x] llama3  │  │ Response from model A...             │  │
+│  [ ] qwen2.5 │  └──────────────────────────────────────┘  │
+│  [x] mistral │  ┌──────────────────────────────────────┐  │
+│  [ ] gemma2  │  │ [B] Model B                          │  │
+│              │  │ Response from model B...             │  │
+│              │  └──────────────────────────────────────┘  │
+├──────────────┴────────────────────────────────────────────┤
+│  [Type your prompt here...]                                │
+├────────────────────────────────────────────────────────────┤
+│  [A/B/C] Vote | [N] Next | [R] Regen | [B] Blind | [Q]   │
+└────────────────────────────────────────────────────────────┘
+```
 
 ## License
 

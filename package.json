@@ -26,13 +26,16 @@
   },
   "license": "MIT",
   "dependencies": {
+    "blessed": "^0.1.81",
+    "blessed-contrib": "^4.11.0",
     "chalk": "^4.1.2",
     "commander": "^11.1.0",
     "inquirer": "^8.2.5"
   },
   "devDependencies": {
+    "@types/blessed": "^0.1.27",
     "@types/inquirer": "^8.2.10",
-    "@types/node": "^20.10.0",
+    "@types/node": "^20.19.39",
     "typescript": "^5.3.2"
   }
 }
