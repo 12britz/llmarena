@@ -1,34 +1,42 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const blessed = require('blessed');
-const Readline = require('readline');
 
-interface ModelInstance {
-  name: string;
-  result?: any;
+interface ModelMessage {
+  model: string;
+  label: string;
+  response: string;
   streaming: boolean;
-  fullResponse: string;
   done: boolean;
+  tokensPerSec?: number;
+  totalTime?: number;
+}
+
+interface ChatMessage {
+  type: 'user' | 'model';
+  content: string;
+  model?: string;
+  label?: string;
+  done?: boolean;
 }
 
 export class LLMArenaTUI {
   private screen: any;
-  private models: string[] = [];
+  private messages: ChatMessage[] = [];
+  private modelResponses: Map<string, ModelMessage> = new Map();
   private selectedModels: string[] = [];
-  private modelInstances: Map<string, ModelInstance> = new Map();
-  private prompt: string = '';
+  private models: string[] = [];
   private blindMode: boolean = false;
-  private hasVoted: boolean = false;
-  private promptIndex: number = 0;
-  private categoryPrompts: any[] = [];
-  private messages: any[] = [];
-  private scrollableMessages: any;
-  private promptInput: any;
+  private currentPrompt: string = '';
+  private input: any;
+  private chatArea: any;
   private sidebar: any;
   private header: any;
   private statusBar: any;
-  private currentView: 'idle' | 'running' | 'done' = 'idle';
-  private votingOpen: boolean = false;
-  private winner: string | null = null;
+  private footer: any;
+  private isGenerating: boolean = false;
+  private hasVoted: boolean = false;
+  private promptIndex: number = 0;
+  private categoryPrompts: any[] = [];
 
   constructor() {
     this.init();
@@ -38,30 +46,39 @@ export class LLMArenaTUI {
     this.screen = blessed.screen({
       smartCSR: true,
       title: 'Local LLM Arena',
-      cursor: { artificial: true, shape: '▌', blink: true },
+      fullUnicode: true,
     });
 
-    this.setupLayout();
-    this.setupEventListeners();
+    this.createLayout();
+    this.setupEvents();
     this.start();
   }
 
-  private setupLayout(): void {
+  private createLayout(): void {
     const { screen } = this;
     const W = screen.width || 140;
     const H = screen.height || 40;
-    const sidebarW = 32;
+    const sidebarW = 28;
 
-    // Header
+    // Dark background container
+    blessed.box({
+      parent: screen,
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%',
+      style: { bg: '#0a0a0a' },
+    });
+
+    // Header bar
     this.header = blessed.box({
       parent: screen,
       top: 0,
       left: 0,
       width: '100%',
       height: 3,
-      style: { bg: 'black', fg: 'cyan' },
+      style: { bg: '#141414', fg: '#ffffff' },
       content: '',
-      tags: true,
     });
 
     // Sidebar
@@ -71,42 +88,38 @@ export class LLMArenaTUI {
       left: 0,
       width: sidebarW,
       height: H - 7,
-      border: { type: 'line', fg: 'magenta' },
-      style: { bg: 'black', fg: 'white', border: { fg: 'magenta' } },
+      style: { bg: '#0d0d0d', fg: '#888888' },
       content: '',
-      tags: true,
     });
 
-    // Chat/Messages area
-    this.scrollableMessages = blessed.box({
+    // Chat area
+    this.chatArea = blessed.box({
       parent: screen,
       top: 3,
       left: sidebarW,
       width: W - sidebarW,
       height: H - 7,
-      border: { type: 'line', fg: 'blue' },
-      style: { bg: 'black', fg: 'white', border: { fg: 'blue' } },
+      style: { bg: '#0a0a0a', fg: '#ffffff' },
       content: '',
-      tags: true,
       scrollable: true,
       alwaysScroll: true,
+      scrollbar: { style: { fg: '#333333' } },
     });
 
-    // Input area
-    this.promptInput = blessed.textbox({
+    // Input box
+    this.input = blessed.textarea({
       parent: screen,
       bottom: 2,
       left: 0,
       width: '100%',
       height: 3,
-      border: { type: 'line', fg: 'green' },
-      style: { 
-        bg: 'black', 
-        fg: 'white', 
-        border: { fg: 'green' },
-        focus: { fg: 'green', border: { fg: 'green' } },
+      style: {
+        bg: '#141414',
+        fg: '#ffffff',
+        focus: { bg: '#1a1a1a' },
       },
       inputOnFocus: true,
+      placeholder: 'Type your prompt...',
     });
 
     // Status bar
@@ -116,36 +129,35 @@ export class LLMArenaTUI {
       left: 0,
       width: '100%',
       height: 1,
-      style: { bg: 'blue', fg: 'white' },
+      style: { bg: '#1a1a1a', fg: '#666666' },
       content: '',
-      tags: true,
+    });
+
+    // Footer hint
+    this.footer = blessed.box({
+      parent: screen,
+      bottom: 1,
+      left: 0,
+      width: '100%',
+      height: 1,
+      style: { bg: '#0d0d0d', fg: '#555555' },
+      content: '',
     });
 
     this.updateHeader();
     this.updateStatusBar();
+    this.updateFooter();
   }
 
   private async start(): Promise<void> {
     const ollama = require('./utils/ollama').ollama;
 
-    this.updateHeader('Connecting to Ollama...');
+    this.chatArea.setContent('{center}{dim-fg}Connecting to Ollama...{/dim-fg}{/center}');
     this.render();
 
     const connected = await ollama.checkConnection();
     if (!connected) {
-      this.scrollableMessages.setContent(
-        `{red-fg}╔══════════════════════════════════════════════════════════════╗
-║                                                              ║
-║   ✖ Cannot connect to Ollama                                ║
-║                                                              ║
-║   Make sure Ollama is running:                              ║
-║   {green-fg}   ollama serve{/green-fg}                                          ║
-║                                                              ║
-║   Then restart this application.                            ║
-║                                                              ║
-╚══════════════════════════════════════════════════════════════╝{/red-fg}`
-      );
-      this.render();
+      this.showError('Cannot connect to Ollama\n\nRun: ollama serve');
       return;
     }
 
@@ -157,57 +169,50 @@ export class LLMArenaTUI {
         this.selectedModels = [this.models[0], this.models[1]];
       }
 
-      this.updateHeader(`Local LLM Arena | ${this.models.length} models | Press Enter to start`);
       this.updateSidebar();
       this.showWelcome();
     } catch (error) {
-      this.scrollableMessages.setContent('{red-fg}Error loading models{/red-fg}');
+      this.showError('Failed to load models');
     }
 
-    this.updateStatusBar();
-    this.promptInput.focus();
+    this.input.focus();
     this.render();
   }
 
-  private setupEventListeners(): void {
-    const { screen, promptInput } = this;
+  private setupEvents(): void {
+    const { screen, input } = this;
 
-    // Quit
     screen.key(['escape', 'q', 'C-c'], () => process.exit(0));
 
-    // Submit prompt
-    promptInput.key('enter', () => {
-      const value = promptInput.getValue().trim();
-      if (value && this.currentView !== 'running') {
-        this.prompt = value;
+    input.key('enter', () => {
+      const value = input.getValue().trim();
+      if (value && !this.isGenerating) {
+        this.currentPrompt = value;
         this.runArena();
       }
+      input.clearValue();
     });
 
-    // Arrow up/down for history (future)
-    promptInput.key(['up', 'down'], () => {});
-
-    // Voting keys
-    screen.key(['a', 'A', 'b', 'B', 'c', 'C', 'd', 'D', 'e', 'E', 'f', 'F'], (ch: string) => {
-      if (this.votingOpen && !this.hasVoted) {
-        this.voteForModel(ch.toUpperCase());
+    // Voting
+    screen.key(['a', 'A', 'b', 'B', 'c', 'C', 'd', 'D'], (ch: string) => {
+      if (this.hasVoted || !this.allModelsDone()) return;
+      const idx = ch.toUpperCase().charCodeAt(0) - 65;
+      if (idx >= 0 && idx < this.selectedModels.length) {
+        this.vote(this.selectedModels[idx]);
       }
     });
 
     screen.key(['t', 'T'], () => {
-      if (this.votingOpen && !this.hasVoted) {
-        this.recordTie();
-      }
+      if (this.hasVoted || !this.allModelsDone()) return;
+      this.voteTie();
     });
 
-    screen.key(['n', 'N', 'right', 'l', 'L'], () => {
-      if (this.hasVoted || this.currentView === 'done') {
-        this.nextPrompt();
-      }
+    screen.key(['n', 'N', 'right'], () => {
+      if (this.hasVoted) this.nextPrompt();
     });
 
     screen.key(['r', 'R'], () => {
-      if (this.prompt && this.currentView !== 'running') {
+      if (this.currentPrompt && !this.isGenerating) {
         this.runArena();
       }
     });
@@ -215,13 +220,10 @@ export class LLMArenaTUI {
     screen.key(['b', 'B'], () => {
       this.blindMode = !this.blindMode;
       this.updateSidebar();
-      if (this.messages.length > 0) {
-        this.redrawMessages();
-      }
-      this.updateStatusBar();
+      this.redrawChat();
     });
 
-    // Click on sidebar
+    // Sidebar click
     this.sidebar.on('click', (data: any) => {
       const line = Math.floor(data.y) - 2;
       if (line >= 0 && line < this.models.length) {
@@ -229,352 +231,197 @@ export class LLMArenaTUI {
       }
     });
 
-    // Resize
     screen.on('resize', () => this.render());
   }
 
-  private showWelcome(): void {
-    const content = `
-{cyan-fg}╔════════════════════════════════════════════════════════════════════╗
-║                                                                    ║
-║   {white-fg}{bold}Welcome to Local LLM Arena{/bold}{/white-fg}                                      ║
-║                                                                    ║
-║   {dim-fg}Compare local LLM models side-by-side{/dim-fg}                             ║
-║   {dim-fg}Vote for the best response{/dim-fg}                                       ║
-║                                                                    ║
-╠════════════════════════════════════════════════════════════════════╣
-║                                                                    ║
-║   {yellow-fg}Quick Start:{/yellow-fg}                                                    ║
-║   1. Select models in the sidebar (or use defaults)                ║
-║   2. Type your prompt below                                       ║
-║   3. Press {white-fg}Enter{/white-fg} to run                                              ║
-║   4. Vote for the best response with {white-fg}A/B/C{/white-fg} keys                ║
-║                                                                    ║
-║   {dim-fg}Press Tab to cycle models, B to toggle blind mode{/dim-fg}               ║
-║                                                                    ║
-╚════════════════════════════════════════════════════════════════════╝{/cyan-fg}
-`;
-    this.scrollableMessages.setContent(content);
-  }
-
-  private updateHeader(msg?: string): void {
-    const mode = this.blindMode ? '{red-fg}[BLIND]{/red-fg}' : '{blue-fg}[REVEAL]{/blue-fg}';
-    const title = '{bold}{cyan-fg}▓▒░{/cyan-fg} Local LLM Arena {cyan-fg}░▒▓{/cyan-fg}{/bold}';
-    const info = msg || `${this.models.length} models | ${this.selectedModels.length} selected ${mode}`;
-    this.header.setContent(`\n{center}${title}  {dim-fg}${info}{/dim-fg}{/center}`);
+  private updateHeader(): void {
+    const modelCount = this.models.length;
+    const selectedCount = this.selectedModels.length;
+    const mode = this.blindMode ? ' BLIND' : '';
+    
+    this.header.setContent(
+      `{bg-black}{fg-white}{bold} Local LLM Arena{/bold}{/fg}  {fg-gray}${modelCount} models | ${selectedCount} selected${mode}{/fg}{right}press /help{/right}`
+    );
   }
 
   private updateSidebar(): void {
-    let content = `{bold}{magenta-fg}┌─ Models (${this.selectedModels.length}) ─┐{/magenta-fg}{/bold}\n`;
-    content += `{magenta-fg}│                              │{/magenta-fg}\n`;
-    
     const labels = ['A', 'B', 'C', 'D', 'E', 'F'];
+    let content = '{bold}{fg-white}Models{/bold}{/fg}\n\n';
     
     for (let i = 0; i < this.models.length; i++) {
       const model = this.models[i];
       const selected = this.selectedModels.includes(model);
-      const check = selected ? `{green-fg}◉{/green-fg}` : `○`;
-      const label = selected && this.selectedModels.indexOf(model) !== -1 
-        ? `{yellow-fg}[${labels[this.selectedModels.indexOf(model)]}]{/yellow-fg}` 
-        : `   `;
-      const shortName = model.substring(0, 22).padEnd(22);
-      content += `{magenta-fg}│{/magenta-fg} ${check} ${label} {white-fg}${shortName}{/white-fg} {magenta-fg}│{/magenta-fg}\n`;
+      const idx = selected ? this.selectedModels.indexOf(model) : -1;
+      const label = idx >= 0 ? `{fg-yellow}[${labels[idx]}]{/fg}` : '   ';
+      const check = selected ? '{fg-green}●{/fg}' : '○';
+      const shortName = model.length > 22 ? model.substring(0, 19) + '...' : model;
+      
+      content += `${check} ${label} {fg-gray}${shortName}{/fg}\n`;
     }
     
-    content += `{magenta-fg}│                              │{/magenta-fg}\n`;
-    content += `{magenta-fg}└──────────────────────────────┘{/magenta-fg}\n\n`;
-    
-    if (this.blindMode) {
-      content += `{red-fg}{bold}⚠ BLIND MODE ON{/bold}{/red-fg}\n`;
-      content += `{dim-fg}Model names are hidden{/dim-fg}\n`;
-    }
+    content += '\n{dim-fg}click to toggle{/dim-fg}';
     
     this.sidebar.setContent(content);
   }
 
   private updateStatusBar(): void {
-    let content = '{center}';
+    let status = '';
     
-    if (this.votingOpen && !this.hasVoted) {
-      content += `{yellow-fg}[A-F] Vote{/yellow-fg} | {dim-fg}[T] Tie{/dim-fg}`;
+    if (this.isGenerating) {
+      const pending = Array.from(this.modelResponses.values()).filter(m => !m.done).length;
+      status = `{fg-cyan}●{/fg} Generating ${pending} responses...`;
     } else if (this.hasVoted) {
-      content += `{green-fg}✓ Voted{/green-fg} | {dim-fg}[N] Next prompt{/dim-fg}`;
-    } else if (this.currentView === 'running') {
-      content += `{cyan-fg}⟳ Generating...{/cyan-fg}`;
+      status = `{fg-green}✓{/fg} Vote recorded | {fg-gray}[N] next prompt{/fg}`;
+    } else if (this.allModelsDone()) {
+      status = `{fg-yellow}[A/B/C/D] vote{/fg} | {fg-gray}[T] tie | [R] regenerate{/fg}`;
     } else {
-      content += `{dim-fg}[Enter] Run{/dim-fg} | [R] Regen | [B] Blind`;
+      status = `{fg-gray}[Enter] run | [R] regen | [B] blind${this.blindMode ? ' ON' : ''}{/fg}`;
     }
     
-    content += ` | [Q] Quit | [Tab] Models{/center}`;
-    this.statusBar.setContent(content);
+    this.statusBar.setContent(`{left}${status}{/left}{right}[Q] quit{/right}`);
   }
 
-  private toggleModel(model: string): void {
-    const index = this.selectedModels.indexOf(model);
-    if (index === -1) {
-      if (this.selectedModels.length < 6) {
-        this.selectedModels.push(model);
-      }
-    } else {
-      this.selectedModels.splice(index, 1);
-    }
-    this.updateSidebar();
-    this.updateHeader();
+  private updateFooter(): void {
+    this.footer.setContent('{center}{dim-fg}Tab: cycle models | click sidebar: toggle selection{/dim-fg}{/center}');
+  }
+
+  private showWelcome(): void {
+    this.chatArea.setContent(`{center}
+{dim-fg}
+     _    ____   ____ ___ ___      __     _____ _                 _             
+    / \\  |  _ \\ / ___|_ _|_ _|____\\ \\   / / ____| |               | |            
+   / _ \\ | |_) | |    | | | |_____|\\ \\ / /| |    | | ___  __ _  ___| | _____ _ __ 
+  / ___ \\|  _ <| |___ | | | |_____| \\ V / | |___| |/ _ \\/ _\\ |/ __| |/ / _ \\ '__|
+ /_/   \\_\ |_> \\____|___|___|       \\_/   \\____|_|_|___\\__,_\\____|_/\\_\\___/|_|   
+                                                                                  
+{/dim-fg}
+
+{center}{fg-gray}Compare local LLM models side-by-side{/fg}{/center}
+
+{dim-fg}Type a prompt below and press Enter to start.{/dim-fg}
+{dim-fg}Models are selected automatically. Click to change.{/dim-fg}
+`);
+  }
+
+  private showError(msg: string): void {
+    this.chatArea.setContent(`{center}
+{dim-fg}Error{/dim-fg}
+
+{fg-red}${msg}{/fg}
+{/center}`);
     this.render();
   }
 
   private async runArena(): Promise<void> {
     if (this.selectedModels.length < 2) {
-      this.scrollableMessages.setContent(
-        `{red-fg}╔═══════════════════════════════════════════════════════╗
-║                                                               ║
-║   ✖ Select at least 2 models                                 ║
-║                                                               ║
-║   Click on models in the sidebar to select them.              ║
-║                                                               ║
-╚═══════════════════════════════════════════════════════════════╝{/red-fg}`
-      );
+      this.chatArea.setContent('{fg-red}Select at least 2 models first!{/fg}\n\nClick on models in the sidebar.');
       this.render();
       return;
     }
 
-    this.currentView = 'running';
+    this.isGenerating = true;
     this.hasVoted = false;
-    this.votingOpen = false;
-    this.winner = null;
-    this.messages = [];
-    this.modelInstances.clear();
+    this.messages = [{ type: 'user', content: this.currentPrompt }];
+    this.modelResponses.clear();
 
-    const { PROMPT_LIBRARY } = require('./types');
-    this.categoryPrompts = PROMPT_LIBRARY;
-    this.promptIndex = 0;
-
-    // Initialize model instances
-    for (const model of this.selectedModels) {
-      this.modelInstances.set(model, {
-        name: model,
+    // Initialize model responses
+    const labels = ['A', 'B', 'C', 'D', 'E', 'F'];
+    for (let i = 0; i < this.selectedModels.length; i++) {
+      const model = this.selectedModels[i];
+      this.modelResponses.set(model, {
+        model,
+        label: labels[i],
+        response: '',
         streaming: true,
-        fullResponse: '',
         done: false,
       });
     }
 
-    // Show prompt and start generating
-    this.showPromptAndStartGenerating();
-    this.updateHeader('Generating responses...');
+    this.redrawChat();
     this.updateStatusBar();
     this.render();
 
-    // Run models
+    // Generate from all models
     await Promise.all(
-      this.selectedModels.map(model => this.generateResponse(model))
+      this.selectedModels.map(model => this.generateFromModel(model))
     );
 
-    this.currentView = 'done';
-    this.votingOpen = true;
-    this.hasVoted = false;
-    this.updateHeader('Vote for the best response!');
+    this.isGenerating = false;
+    this.redrawChat();
     this.updateStatusBar();
     this.render();
   }
 
-  private showPromptAndStartGenerating(): void {
-    const labels = ['A', 'B', 'C', 'D', 'E', 'F'];
-    
-    let content = `{cyan-fg}{bold}╔════════════════════════════════════════════════════════════════════════╗{/bold}{/cyan-fg}
-║{white-fg} {bold}Prompt:{/bold} ${this.truncate(this.prompt, 75).padEnd(75)} {cyan-fg}║{/cyan-fg}
-╠════════════════════════════════════════════════════════════════════════╣{/cyan-fg}
-`;
-    this.messages.push({ type: 'prompt', content });
-    
-    for (let i = 0; i < this.selectedModels.length; i++) {
-      const model = this.selectedModels[i];
-      const label = labels[i];
-      const displayName = this.blindMode ? `${label}` : model;
-      content += `{cyan-fg}║{/cyan-fg} {bold}{yellow-fg}[${label}]{/yellow-fg}{/bold} {displayName}                                          {cyan-fg}║{/cyan-fg}
-║{white-fg} ${'▒'.repeat(76)} {cyan-fg}║{/cyan-fg}
-`;
-      this.messages.push({ type: 'model', model, label, content: '' });
-    }
-    
-    content += `{cyan-fg}╚════════════════════════════════════════════════════════════════════════╝{/cyan-fg}`;
-    
-    this.scrollableMessages.setContent(content);
-    this.promptInput.clearValue();
-  }
-
-  private async generateResponse(model: string): Promise<void> {
+  private async generateFromModel(model: string): Promise<void> {
     const ollama = require('./utils/ollama').ollama;
-    const instance = this.modelInstances.get(model)!;
-    const index = this.selectedModels.indexOf(model);
-    const label = ['A', 'B', 'C', 'D', 'E', 'F'][index];
-    const displayName = this.blindMode ? `${label}` : model;
+    const response = this.modelResponses.get(model)!;
 
     try {
-      await ollama.generateResponse(model, this.prompt, (chunk: string) => {
-        instance.fullResponse += chunk;
-        this.updateModelMessage(model, label, displayName, instance.fullResponse, true);
+      await ollama.generateResponse(model, this.currentPrompt, (chunk: string) => {
+        response.response += chunk;
+        this.redrawChat();
         this.render();
       });
 
-      instance.done = true;
-      instance.result = { tokensPerSecond: 42, totalTime: 3.5 }; // Placeholder
-      this.updateModelMessage(model, label, displayName, instance.fullResponse, false);
-      
+      response.done = true;
+      response.streaming = false;
     } catch (error: any) {
-      instance.fullResponse = `{red-fg}Error: ${error.message}{/red-fg}`;
-      instance.done = true;
-      this.updateModelMessage(model, label, displayName, instance.fullResponse, false);
+      response.response = `{fg-red}Error: ${error.message}{/fg}`;
+      response.done = true;
     }
 
+    this.redrawChat();
     this.render();
   }
 
-  private updateModelMessage(model: string, label: string, displayName: string, text: string, streaming: boolean): void {
-    const modelMsg = this.messages.find(m => m.model === model);
-    if (!modelMsg) return;
-
-    const truncated = text.length > 3000 ? text.substring(0, 3000) + '\n{dim-fg}[truncated]{/dim-fg}' : text;
-    const status = streaming ? `{cyan-fg}⟳{/cyan-fg}` : `{green-fg}✓{/green-fg}`;
-    
-    modelMsg.content = `{cyan-fg}║{/cyan-fg} {bold}{yellow-fg}[${label}]{/yellow-fg}{/bold} {displayName} ${status}                                          {cyan-fg}║{/cyan-fg}
-║{white-fg} ${this.wrapText(truncated, 76).join('\n' + ' '.repeat(79))} {cyan-fg}║{/cyan-fg}
-`;
-    
-    this.redrawMessages();
+  private allModelsDone(): boolean {
+    return Array.from(this.modelResponses.values()).every(m => m.done);
   }
 
-  private redrawMessages(): void {
-    let content = `{cyan-fg}{bold}╔════════════════════════════════════════════════════════════════════════╗{/bold}{/cyan-fg}
-║{white-fg} {bold}Prompt:{/bold} ${this.truncate(this.prompt, 75).padEnd(75)} {cyan-fg}║{/cyan-fg}
-╠════════════════════════════════════════════════════════════════════════╣{/cyan-fg}
-`;
-    
-    const labels = ['A', 'B', 'C', 'D', 'E', 'F'];
-    
-    for (let i = 0; i < this.selectedModels.length; i++) {
-      const model = this.selectedModels[i];
-      const instance = this.modelInstances.get(model);
-      const label = labels[i];
-      const displayName = this.blindMode ? `${label}` : model;
+  private redrawChat(): void {
+    let content = '';
+    const maxW = 120;
+
+    // Show user prompt
+    content += `{bg-blue}{fg-white} You {/bg}{/fg}\n`;
+    content += this.wrapText(this.currentPrompt, maxW - 2).join('\n') + '\n\n';
+
+    // Show model responses
+    for (const [model, resp] of this.modelResponses) {
+      const name = this.blindMode ? `[${resp.label}]` : resp.model;
+      const status = resp.done ? '{fg-green}✓{/fg}' : '{fg-cyan}●{/fg}';
       
-      if (instance) {
-        const status = instance.done ? `{green-fg}✓{/green-fg}` : `{cyan-fg}⟳{/cyan-fg}`;
-        const response = instance.fullResponse || `{dim-fg}Generating...{/dim-fg}`;
-        const truncated = response.length > 3000 ? response.substring(0, 3000) + '\n{dim-fg}[truncated]{/dim-fg}' : response;
-        
-        content += `{cyan-fg}║{/cyan-fg} {bold}{yellow-fg}[${label}]{/yellow-fg}{/bold} {displayName} ${status}                                          {cyan-fg}║{/cyan-fg}\n`;
-        
-        const lines = this.wrapText(truncated, 76);
-        for (const line of lines.slice(0, 15)) {
-          content += `{cyan-fg}║{/cyan-fg}{white-fg} ${line.padEnd(76)}{/white-fg} {cyan-fg}║{/cyan-fg}\n`;
-        }
-        
-        if (lines.length > 15) {
-          content += `{cyan-fg}║{/cyan-fg}{dim-fg} ... (${lines.length - 15} more lines){/dim-fg}                    {cyan-fg}║{/cyan-fg}\n`;
-        }
-        
-        if (i < this.selectedModels.length - 1) {
-          content += `{cyan-fg}╟──────────────────────────────────────────────────────────────────────────────╢{/cyan-fg}\n`;
-        }
+      content += `{bg-gray} ${name} ${status} {/bg}\n`;
+      
+      if (resp.response) {
+        content += this.wrapText(resp.response, maxW - 2).join('\n') + '\n';
+      } else {
+        content += `{dim-fg}generating...{/dim-fg}\n`;
       }
+      content += '\n';
     }
-    
-    content += `{cyan-fg}╚════════════════════════════════════════════════════════════════════════╝{/cyan-fg}`;
-    
-    if (this.votingOpen && !this.hasVoted) {
-      content += `\n\n{yellow-fg}{bold}═════════════════════════════════════════════════════════════════════════════{/bold}{/yellow-fg}
-║                                                                       ║
-║   {white-fg}{bold}Which response was better?{/bold}                                             ║
-║                                                                       ║
-║   {yellow-fg}[A/B/C/D/E/F]{yellow-fg} Vote for a model    {dim-fg}[T] Tie{/dim-fg}                      ║
-║                                                                       ║
-╚═════════════════════════════════════════════════════════════════════════╝`;
-    } else if (this.hasVoted) {
-      const winnerLabel = this.winner === 'tie' ? 'TIE' : this.winner;
-      content += `\n\n{green-fg}{bold}═════════════════════════════════════════════════════════════════════════════{/bold}{/green-fg}
-║                                                                       ║
-║   {white-fg}{bold}Vote recorded for ${winnerLabel}{/bold}                                          ║
-║                                                                       ║
-║   {dim-fg}Press [N] for next prompt or [R] to regenerate{/dim-fg}                        ║
-║                                                                       ║
-╚═════════════════════════════════════════════════════════════════════════╝`;
-    }
-    
-    this.scrollableMessages.setContent(content);
-  }
 
-  private voteForModel(label: string): void {
-    const index = ['A', 'B', 'C', 'D', 'E', 'F'].indexOf(label);
-    if (index >= 0 && index < this.selectedModels.length) {
-      const winner = this.selectedModels[index];
-      this.hasVoted = true;
-      this.winner = winner;
-      this.votingOpen = false;
-
-      if (this.selectedModels.length === 2) {
-        const loser = this.selectedModels.find(m => m !== winner)!;
-        const storage = require('./utils/storage');
-        storage.updateElo(winner, loser, false);
+    // Voting prompt
+    if (this.allModelsDone() && !this.hasVoted) {
+      content += `{bg-yellow}{fg-black} VOTE {/bg}{/fg} {fg-white}Which response was better? {/fg}`;
+      const labels = ['A', 'B', 'C', 'D'];
+      for (const [model, resp] of this.modelResponses) {
+        content += `{fg-yellow}[${resp.label}]{/fg} `;
       }
-
-      const storage = require('./utils/storage');
-      storage.saveSession({
-        id: Date.now().toString(36),
-        prompt: this.prompt,
-        results: this.selectedModels.map(m => this.modelInstances.get(m)?.result).filter(Boolean),
-        votes: [{ prompt: this.prompt, winnerId: winner, isTie: false, timestamp: Date.now() }],
-        timestamp: Date.now(),
-      });
-
-      this.updateHeader(`Vote recorded for ${this.blindMode ? label : winner}!`);
-      this.updateStatusBar();
-      this.redrawMessages();
-      this.render();
+      content += `{fg-gray}[T] tie{/fg}\n`;
     }
-  }
 
-  private recordTie(): void {
-    if (this.selectedModels.length === 2) {
-      const storage = require('./utils/storage');
-      storage.updateElo(this.selectedModels[0], this.selectedModels[1], true);
-    }
-    this.hasVoted = true;
-    this.winner = 'tie';
-    this.votingOpen = false;
-    this.updateHeader('Tie recorded!');
-    this.updateStatusBar();
-    this.redrawMessages();
-    this.render();
-  }
-
-  private nextPrompt(): void {
-    this.promptIndex++;
-    if (this.promptIndex >= this.categoryPrompts.length) {
-      this.promptIndex = 0;
-    }
-    
-    this.prompt = this.categoryPrompts[this.promptIndex].text;
-    this.currentView = 'idle';
-    this.hasVoted = false;
-    this.votingOpen = false;
-    this.messages = [];
-    this.modelInstances.clear();
-    
-    this.showWelcome();
-    this.promptInput.clearValue();
-    this.updateHeader(`${this.categoryPrompts[this.promptIndex].category}: ${this.categoryPrompts[this.promptIndex].name}`);
-    this.updateStatusBar();
-    this.render();
-  }
-
-  private truncate(text: string, len: number): string {
-    return text.length > len ? text.substring(0, len - 3) + '...' : text;
+    this.chatArea.setContent(content);
+    this.chatArea.setScrollPerc(100);
   }
 
   private wrapText(text: string, width: number): string[] {
-    const words = text.split(/\s+/);
+    // Strip tags for length calculation
+    const cleanText = text.replace(/\{[^}]+\}/g, '');
+    if (cleanText.length <= width) return [text];
+
     const lines: string[] = [];
+    const words = cleanText.split(/\s+/);
     let current = '';
 
     for (const word of words) {
@@ -586,7 +433,73 @@ export class LLMArenaTUI {
       }
     }
     if (current) lines.push(current);
-    return lines.length ? lines : [''];
+    return lines;
+  }
+
+  private vote(model: string): void {
+    this.hasVoted = true;
+    const resp = this.modelResponses.get(model)!;
+
+    // Update Elo
+    if (this.selectedModels.length === 2) {
+      const loser = this.selectedModels.find(m => m !== model)!;
+      const storage = require('./utils/storage');
+      storage.updateElo(model, loser, false);
+      storage.saveSession({
+        id: Date.now().toString(36),
+        prompt: this.currentPrompt,
+        results: Array.from(this.modelResponses.values()).map(r => ({
+          modelName: r.model,
+          response: r.response,
+          tokensPerSecond: r.tokensPerSec,
+          totalTime: r.totalTime,
+        })),
+        votes: [{ prompt: this.currentPrompt, winnerId: model, isTie: false, timestamp: Date.now() }],
+        timestamp: Date.now(),
+      });
+    }
+
+    this.updateStatusBar();
+    this.redrawChat();
+    this.render();
+  }
+
+  private voteTie(): void {
+    this.hasVoted = true;
+    if (this.selectedModels.length === 2) {
+      const storage = require('./utils/storage');
+      storage.updateElo(this.selectedModels[0], this.selectedModels[1], true);
+    }
+    this.updateStatusBar();
+    this.redrawChat();
+    this.render();
+  }
+
+  private nextPrompt(): void {
+    const { PROMPT_LIBRARY } = require('./types');
+    this.categoryPrompts = PROMPT_LIBRARY;
+    
+    this.promptIndex = (this.promptIndex + 1) % this.categoryPrompts.length;
+    this.currentPrompt = this.categoryPrompts[this.promptIndex].text;
+    this.hasVoted = false;
+    this.messages = [];
+    this.modelResponses.clear();
+    
+    this.showWelcome();
+    this.updateStatusBar();
+    this.render();
+  }
+
+  private toggleModel(model: string): void {
+    const idx = this.selectedModels.indexOf(model);
+    if (idx >= 0) {
+      this.selectedModels.splice(idx, 1);
+    } else if (this.selectedModels.length < 4) {
+      this.selectedModels.push(model);
+    }
+    this.updateSidebar();
+    this.updateHeader();
+    this.render();
   }
 
   private render(): void {
@@ -594,5 +507,4 @@ export class LLMArenaTUI {
   }
 }
 
-// Start the TUI
 new LLMArenaTUI();
