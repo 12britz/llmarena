@@ -1,376 +1,249 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-const blessed = require('blessed');
+import * as readline from 'readline';
+import { ollama } from './utils/ollama';
+import { updateElo, saveSession } from './utils/storage';
+import { PROMPT_LIBRARY } from './types';
 
-interface ModelResponse {
-  model: string;
-  label: string;
-  text: string;
-  done: boolean;
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+});
+
+const models: string[] = [];
+let selectedModels: string[] = [];
+let blindMode = false;
+let promptIndex = 0;
+
+const c = {
+  reset: '\x1b[0m',
+  bold: '\x1b[1m',
+  dim: '\x1b[2m',
+  cyan: '\x1b[36m',
+  yellow: '\x1b[33m',
+  green: '\x1b[32m',
+  red: '\x1b[31m',
+  blue: '\x1b[34m',
+  white: '\x1b[37m',
+  gray: '\x1b[90m',
+  black: '\x1b[30m',
+};
+
+function clear(): void {
+  console.clear();
 }
 
-export class LLMArenaTUI {
-  private screen: any;
-  private messages: any[] = [];
-  private modelResponses: Map<string, ModelResponse> = new Map();
-  private selectedModels: string[] = [];
-  private models: string[] = [];
-  private blindMode: boolean = false;
-  private currentPrompt: string = '';
-  private input: any;
-  private chatArea: any;
-  private sidebar: any;
-  private statusBar: any;
-  private isGenerating: boolean = false;
-  private hasVoted: boolean = false;
-  private promptIndex: number = 0;
+function header(): void {
+  console.log(`${c.cyan}${c.bold}
+   _    ____   ____ ___ ___ 
+  /\\  |  _ \\ / ___|_ _|_ _|
+ /  \\ | |_) | |    | | | | 
+/ /\\ \\|  _ <| |___ | | | | 
+/ ____ \\|_) \\\\____|___|___|
+/_/    \\_\\\\_\\\\/
+${c.reset}${c.gray}Local LLM Arena - Compare local models${c.reset}\n`);
+}
 
-  constructor() {
-    this.init();
+function printModels(): void {
+  const labels = ['A', 'B', 'C', 'D'];
+  console.log(`${c.cyan}┌─ Models ─────────────────────────────────────┐${c.reset}`);
+  
+  for (let i = 0; i < models.length; i++) {
+    const m = models[i];
+    const idx = selectedModels.indexOf(m);
+    const sel = idx >= 0 ? `${c.green}◉` : `${c.gray}○`;
+    const label = idx >= 0 ? `${c.yellow}[${labels[idx]}]` : '   ';
+    const name = m.length > 35 ? m.substring(0, 32) + '...' : m;
+    console.log(`  ${sel} ${label} ${c.white}${name}${c.reset}`);
   }
+  
+  console.log(`${c.cyan}└──────────────────────────────────────────────────┘${c.reset}`);
+  console.log(`${c.gray}Selected: ${c.reset}${c.white}${selectedModels.length}${c.reset} | ${c.gray}Blind: ${blindMode ? c.red + 'ON' : c.gray + 'OFF'}${c.reset}`);
+}
 
-  private init(): void {
-    this.screen = blessed.screen({
-      smartCSR: true,
-      title: 'Local LLM Arena',
-    });
-
-    const W = this.screen.width || 140;
-    const H = this.screen.height || 40;
-    const sidebarW = 26;
-
-    // Sidebar
-    this.sidebar = blessed.box({
-      screen: this.screen,
-      top: 0,
-      left: 0,
-      width: sidebarW,
-      height: H,
-      style: { bg: 'black', fg: 'white' },
-      content: '',
-    });
-
-    // Chat area
-    this.chatArea = blessed.box({
-      screen: this.screen,
-      top: 0,
-      left: sidebarW,
-      width: W - sidebarW,
-      height: H - 3,
-      style: { bg: 'black', fg: 'white' },
-      content: '',
-      scrollable: true,
-      alwaysScroll: true,
-    });
-
-    // Input
-    this.input = blessed.textarea({
-      screen: this.screen,
-      bottom: 0,
-      left: 0,
-      width: '100%',
-      height: 3,
-      style: { bg: 'black', fg: 'white', border: { fg: 'blue' } },
-      inputOnFocus: true,
-      placeholder: 'Type prompt...',
-    });
-
-    // Status bar
-    this.statusBar = blessed.box({
-      screen: this.screen,
-      top: H - 3,
-      left: 0,
-      width: '100%',
-      height: 3,
-      style: { bg: 'black', fg: 'white' },
-      content: '',
-    });
-
-    this.setupEvents();
-    this.start();
+async function listModels(): Promise<void> {
+  clear();
+  header();
+  console.log(`${c.yellow}Checking Ollama...${c.reset}\n`);
+  
+  const connected = await ollama.checkConnection();
+  if (!connected) {
+    console.log(`${c.red}✖ Cannot connect to Ollama${c.reset}`);
+    console.log(`${c.gray}Make sure Ollama is running: ${c.green}ollama serve${c.reset}`);
+    rl.close();
+    return;
   }
+  
+  const available = await ollama.listModels();
+  models.length = 0;
+  models.push(...available.map(m => m.name));
+  
+  if (models.length >= 2) {
+    selectedModels = [models[0], models[1]];
+  }
+  
+  clear();
+  header();
+  printModels();
+  console.log();
+}
 
-  private async start(): Promise<void> {
-    const ollama = require('./utils/ollama').ollama;
-
-    this.updateChat('{center}{yellow-fg}Connecting to Ollama...{/yellow-fg}{/center}');
-    this.render();
-
-    const connected = await ollama.checkConnection();
-    if (!connected) {
-      this.updateChat('{center}{red-fg}Cannot connect to Ollama{/red-fg}\n\nRun: {green-fg}ollama serve{/green-fg}{/center}');
-      this.render();
-      return;
+async function runArena(prompt: string): Promise<void> {
+  if (selectedModels.length < 2) {
+    console.log(`${c.red}Select at least 2 models first!${c.reset}`);
+    return;
+  }
+  
+  clear();
+  header();
+  console.log(`${c.blue}${c.bold} You ${c.reset}\n${prompt}\n`);
+  console.log(`${c.cyan}Generating responses from ${selectedModels.length} models...${c.reset}\n`);
+  
+  const labels = ['A', 'B', 'C', 'D'];
+  const responses: Map<string, { text: string; done: boolean }> = new Map();
+  
+  for (const model of selectedModels) {
+    responses.set(model, { text: '', done: false });
+  }
+  
+  await Promise.all(
+    selectedModels.map(async (model) => {
+      try {
+        await ollama.generateResponse(model, prompt, (chunk) => {
+          const resp = responses.get(model)!;
+          resp.text += chunk;
+        });
+        responses.get(model)!.done = true;
+      } catch (error: any) {
+        responses.get(model)!.text = `Error: ${error.message}`;
+        responses.get(model)!.done = true;
+      }
+    })
+  );
+  
+  clear();
+  header();
+  
+  for (let i = 0; i < selectedModels.length; i++) {
+    const model = selectedModels[i];
+    const resp = responses.get(model)!;
+    const label = labels[i];
+    const name = blindMode ? label : model;
+    
+    console.log(`${c.green}${c.bold}[${label}] ${name}${c.reset} ${resp.done ? c.green + '✓' : c.cyan + '○'}${c.reset}`);
+    console.log(`${c.gray}${'─'.repeat(50)}${c.reset}`);
+    
+    const lines = resp.text.split('\n').slice(0, 15);
+    for (const line of lines) {
+      console.log(`  ${line.substring(0, 100)}`);
     }
-
-    try {
-      const availableModels = await ollama.listModels();
-      this.models = availableModels.map((m: any) => m.name);
+    
+    if (resp.text.split('\n').length > 15) {
+      console.log(`  ${c.dim}(+${resp.text.split('\n').length - 15} more lines)${c.reset}`);
+    }
+    console.log();
+  }
+  
+  console.log(`${c.yellow}${c.bold}VOTE${c.reset} ${c.white}Which was better?${c.reset}`);
+  console.log(`  ${c.yellow}[A/B/C/D]${c.reset} vote | ${c.gray}[T]${c.reset} tie | ${c.gray}[N]${c.reset} next | ${c.gray}[R]${c.reset} regen | ${c.gray}[Q]${c.reset} quit\n`);
+  
+  const vote = await question(`${c.cyan}>${c.reset} `);
+  const voteLabels = ['a', 'b', 'c', 'd'];
+  
+  if (voteLabels.includes(vote.toLowerCase())) {
+    const idx = voteLabels.indexOf(vote.toLowerCase());
+    if (idx < selectedModels.length) {
+      const winner = selectedModels[idx];
       
-      if (this.models.length >= 2) {
-        this.selectedModels = [this.models[0], this.models[1]];
+      if (selectedModels.length === 2) {
+        const loser = selectedModels.find(m => m !== winner)!;
+        updateElo(winner, loser, false);
       }
-
-      this.updateSidebar();
-      this.showWelcome();
-    } catch (error) {
-      this.updateChat('{center}{red-fg}Failed to load models{/red-fg}{/center}');
-    }
-
-    this.input.focus();
-    this.render();
-  }
-
-  private setupEvents(): void {
-    const { screen, input } = this;
-
-    screen.key(['escape', 'q', 'C-c'], () => process.exit(0));
-
-    input.key('enter', () => {
-      const value = input.getValue().trim();
-      if (value && !this.isGenerating) {
-        this.currentPrompt = value;
-        this.runArena();
-      }
-      input.clearValue();
-    });
-
-    screen.key(['a', 'A', 'b', 'B', 'c', 'C', 'd', 'D'], (ch: string) => {
-      if (this.hasVoted || !this.allDone()) return;
-      const idx = ch.charCodeAt(0) - 65;
-      if (idx >= 0 && idx < this.selectedModels.length) {
-        this.vote(this.selectedModels[idx]);
-      }
-    });
-
-    screen.key(['t', 'T'], () => {
-      if (!this.hasVoted && this.allDone()) this.voteTie();
-    });
-
-    screen.key(['n', 'N'], () => {
-      if (this.hasVoted) this.nextPrompt();
-    });
-
-    screen.key(['r', 'R'], () => {
-      if (this.currentPrompt && !this.isGenerating) this.runArena();
-    });
-
-    screen.key(['b', 'B'], () => {
-      this.blindMode = !this.blindMode;
-      this.updateSidebar();
-      this.redraw();
-    });
-
-    this.sidebar.on('click', (data: any) => {
-      const line = Math.floor(data.y) - 1;
-      if (line >= 0 && line < this.models.length) {
-        this.toggleModel(this.models[line]);
-      }
-    });
-
-    screen.on('resize', () => this.render());
-  }
-
-  private updateSidebar(): void {
-    const labels = ['A', 'B', 'C', 'D', 'E', 'F'];
-    let content = '{bold}{white-fg}MODELS{/white-fg}{/bold}\n\n';
-    
-    for (let i = 0; i < this.models.length; i++) {
-      const model = this.models[i];
-      const selected = this.selectedModels.includes(model);
-      const idx = selected ? this.selectedModels.indexOf(model) : -1;
-      const label = idx >= 0 ? `{yellow-fg}[${labels[idx]}]{/yellow-fg}` : '   ';
-      const check = selected ? '{green-fg}*' : ' ';
-      const name = model.length > 20 ? model.substring(0, 17) + '...' : model;
       
-      content += `{dim-fg}${check}{/dim-fg} ${label} {white-fg}${name}{/white-fg}\n`;
-    }
-    
-    content += `\n{dim-fg}selected: ${this.selectedModels.length}{/dim-fg}`;
-    
-    this.sidebar.setContent(content);
-  }
-
-  private updateStatusBar(): void {
-    let status = '';
-    
-    if (this.isGenerating) {
-      const pending = Array.from(this.modelResponses.values()).filter(m => !m.done).length;
-      status = `{cyan-fg}running ${pending} models...{/cyan-fg}`;
-    } else if (this.hasVoted) {
-      status = `{green-fg}voted{/green-fg} | [N] next`;
-    } else if (this.allDone()) {
-      status = `{yellow-fg}[A-D] vote{/yellow-fg} | [T] tie`;
-    } else {
-      status = `{dim-fg}type prompt + enter{/dim-fg}`;
-    }
-    
-    this.statusBar.setContent(` {white-fg}${status}{/white-fg}              {dim-fg}[Q] quit [B] blind${this.blindMode ? ' ON' : ''}{/dim-fg}`);
-  }
-
-  private showWelcome(): void {
-    this.updateChat(`{center}{cyan-fg}
-     _    ____   ____ ___ ___ 
-    /\\  |  _ \\ / ___|_ _|_ _|
-   /  \\ | |_) | |    | | | | 
-  / /\\ \\|  _ <| |___ | | | | 
- / ____ \\|_) \\\\____|___|___|
-/_/    \\_\\_\\\\/
-{/cyan-fg}{/center}
-
-{center}{white-fg}Local LLM Arena{/white-fg}{/center}
-{center}{dim-fg}Compare local models side-by-side{/dim-fg}{/center}
-
-{center}{dim-fg}Type a prompt and press Enter{/dim-fg}{/center}
-{center}{dim-fg}${this.selectedModels.length} models selected{/dim-fg}{/center}`);
-  }
-
-  private updateChat(content: string): void {
-    this.chatArea.setContent(content);
-  }
-
-  private async runArena(): Promise<void> {
-    if (this.selectedModels.length < 2) {
-      this.updateChat('{center}{red-fg}Select at least 2 models!{/red-fg}\n\nClick in sidebar{/center}');
-      this.render();
-      return;
-    }
-
-    this.isGenerating = true;
-    this.hasVoted = false;
-    this.modelResponses.clear();
-
-    const labels = ['A', 'B', 'C', 'D'];
-    for (let i = 0; i < this.selectedModels.length; i++) {
-      const model = this.selectedModels[i];
-      this.modelResponses.set(model, {
-        model,
-        label: labels[i],
-        text: '',
-        done: false,
+      console.log(`${c.green}✓ Vote recorded for ${blindMode ? voteLabels[idx].toUpperCase() : winner}${c.reset}`);
+      
+      saveSession({
+        id: Date.now().toString(36),
+        prompt,
+        results: selectedModels.map(m => ({
+          modelId: m,
+          modelName: m,
+          response: responses.get(m)!.text,
+          tokensPerSecond: 0,
+          totalTime: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+        })),
+        votes: [{ prompt, winnerId: winner, isTie: false, timestamp: Date.now() }],
+        timestamp: Date.now(),
       });
     }
-
-    this.updateStatusBar();
-    this.redraw();
-
-    await Promise.all(
-      this.selectedModels.map(model => this.generate(model))
-    );
-
-    this.isGenerating = false;
-    this.updateStatusBar();
-    this.redraw();
-  }
-
-  private async generate(model: string): Promise<void> {
-    const ollama = require('./utils/ollama').ollama;
-    const resp = this.modelResponses.get(model)!;
-
-    try {
-      await ollama.generateResponse(model, this.currentPrompt, (chunk: string) => {
-        resp.text += chunk;
-        this.redraw();
-      });
-      resp.done = true;
-    } catch (error: any) {
-      resp.text = `{red-fg}Error: ${error.message}{/red-fg}`;
-      resp.done = true;
+  } else if (vote.toLowerCase() === 't') {
+    if (selectedModels.length === 2) {
+      updateElo(selectedModels[0], selectedModels[1], true);
     }
-
-    this.redraw();
-  }
-
-  private allDone(): boolean {
-    return this.modelResponses.size > 0 && 
-           Array.from(this.modelResponses.values()).every(m => m.done);
-  }
-
-  private redraw(): void {
-    if (this.modelResponses.size === 0) return;
-
-    let content = `{white-fg}{bold}You:{/bold} ${this.currentPrompt}{/white-fg}\n\n`;
-    const labels = ['A', 'B', 'C', 'D'];
-
-    for (let i = 0; i < this.selectedModels.length; i++) {
-      const model = this.selectedModels[i];
-      const resp = this.modelResponses.get(model);
-      if (!resp) continue;
-
-      const name = this.blindMode ? labels[i] : model;
-      const status = resp.done ? `{green-fg}[v]{/green-fg}` : `{cyan-fg}[-]{/cyan-fg}`;
-      
-      content += `{yellow-fg}{bold}[${labels[i]}]{/bold}{/yellow-fg} {white-fg}${name}{/white-fg} ${status}\n`;
-      
-      if (resp.text) {
-        const lines = resp.text.split('\n').slice(0, 10);
-        content += lines.map((l: string) => `  ${l.substring(0, 100)}`).join('\n') + '\n';
-      } else {
-        content += `  {dim-fg}generating...{/dim-fg}\n`;
-      }
-      content += '\n';
-    }
-
-    if (this.allDone() && !this.hasVoted) {
-      content += `{yellow-fg}{bold}VOTE:{/bold}{/yellow-fg} Which was better? `;
-      for (let i = 0; i < this.selectedModels.length; i++) {
-        content += `{yellow-fg}[${labels[i]}]{/yellow-fg} `;
-      }
-      content += `{dim-fg}[T] tie{/dim-fg}\n`;
-    }
-
-    this.updateChat(content);
-    this.chatArea.setScrollPerc(100);
-    this.render();
-  }
-
-  private vote(model: string): void {
-    this.hasVoted = true;
-
-    if (this.selectedModels.length === 2) {
-      const loser = this.selectedModels.find(m => m !== model)!;
-      const storage = require('./utils/storage');
-      storage.updateElo(model, loser, false);
-    }
-
-    this.updateStatusBar();
-    this.redraw();
-  }
-
-  private voteTie(): void {
-    this.hasVoted = true;
-    if (this.selectedModels.length === 2) {
-      const storage = require('./utils/storage');
-      storage.updateElo(this.selectedModels[0], this.selectedModels[1], true);
-    }
-    this.updateStatusBar();
-    this.redraw();
-  }
-
-  private nextPrompt(): void {
-    const { PROMPT_LIBRARY } = require('./types');
-    this.promptIndex = (this.promptIndex + 1) % PROMPT_LIBRARY.length;
-    this.currentPrompt = PROMPT_LIBRARY[this.promptIndex].text;
-    this.hasVoted = false;
-    this.modelResponses.clear();
-    this.showWelcome();
-    this.updateStatusBar();
-    this.render();
-  }
-
-  private toggleModel(model: string): void {
-    const idx = this.selectedModels.indexOf(model);
-    if (idx >= 0) {
-      this.selectedModels.splice(idx, 1);
-    } else if (this.selectedModels.length < 4) {
-      this.selectedModels.push(model);
-    }
-    this.updateSidebar();
-    this.render();
-  }
-
-  private render(): void {
-    this.screen.render();
+    console.log(`${c.yellow}Tie recorded${c.reset}`);
   }
 }
 
-new LLMArenaTUI();
+function question(query: string): Promise<string> {
+  return new Promise(resolve => rl.question(query, resolve));
+}
+
+export async function main(): Promise<void> {
+  await listModels();
+  
+  console.log(`${c.gray}Type a prompt and press Enter, or command:${c.reset}`);
+  console.log(`  ${c.gray}[m]${c.reset} toggle models  ${c.gray}[b]${c.reset} blind mode  ${c.gray}[n]${c.reset} next prompt  ${c.gray}[q]${c.reset} quit\n`);
+  
+  while (true) {
+    const input = await question(`${c.cyan}>${c.reset} `);
+    const cmd = input.trim().toLowerCase();
+    
+    if (cmd === 'q' || cmd === 'quit' || cmd === 'exit') {
+      console.log(`${c.gray}Goodbye!${c.reset}`);
+      rl.close();
+      break;
+    }
+    
+    if (cmd === 'm') {
+      console.log(`${c.yellow}Enter model number to toggle (0-${models.length - 1}):${c.reset}`);
+      const num = await question(`${c.cyan}>${c.reset} `);
+      const idx = parseInt(num);
+      if (idx >= 0 && idx < models.length) {
+        const model = models[idx];
+        const sidx = selectedModels.indexOf(model);
+        if (sidx >= 0) {
+          selectedModels.splice(sidx, 1);
+        } else if (selectedModels.length < 4) {
+          selectedModels.push(model);
+        }
+      }
+      clear();
+      header();
+      printModels();
+      console.log();
+      continue;
+    }
+    
+    if (cmd === 'b') {
+      blindMode = !blindMode;
+      clear();
+      header();
+      printModels();
+      console.log();
+      continue;
+    }
+    
+    if (cmd === 'n') {
+      promptIndex = (promptIndex + 1) % PROMPT_LIBRARY.length;
+      const p = PROMPT_LIBRARY[promptIndex];
+      console.log(`${c.gray}Prompt ${promptIndex + 1}: ${c.reset}${c.white}${p.category} - ${p.name}${c.reset}`);
+      console.log(`  ${c.dim}${p.text}${c.reset}\n`);
+      await runArena(p.text);
+      continue;
+    }
+    
+    if (input.trim()) {
+      await runArena(input.trim());
+    }
+  }
+}

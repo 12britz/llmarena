@@ -2,7 +2,7 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { LLMArenaTUI } from './tui';
+import { main } from './tui';
 import { leaderboardCommand } from './commands/leaderboard';
 import { listCommand } from './commands/list';
 
@@ -15,9 +15,9 @@ program
 
 program
   .command('start')
-  .description('Start the TUI arena mode')
+  .description('Start the arena mode')
   .action(() => {
-    new LLMArenaTUI();
+    main();
   });
 
 program
