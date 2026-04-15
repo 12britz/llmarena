@@ -10,7 +10,7 @@ Compare **local LLMs** head-to-head in a fast, keyboard-first terminal arena.
 
 `llmring` brings side-by-side model evaluation to your terminal with streaming responses, blind voting, and Elo-based rankings.
 
-![LLMRing Demo](https://via.placeholder.com/1200x600?text=LLMRing+TUI)
+
 
 ## Why Use It
 
@@ -19,6 +19,9 @@ Compare **local LLMs** head-to-head in a fast, keyboard-first terminal arena.
 - Run **blind evaluations** to reduce model-name bias
 - Vote winners instantly and build an **Elo leaderboard**
 - Stay in flow with full keyboard navigation
+
+<img width="1387" height="472" alt="image" src="https://github.com/user-attachments/assets/d17c633a-f243-46ad-9818-2b6cb98c38a2" />
+
 
 ## Features
 
@@ -33,6 +36,9 @@ Compare **local LLMs** head-to-head in a fast, keyboard-first terminal arena.
 
 - Node.js 14 or later
 - [Ollama](https://ollama.com) installed and running
+
+<img width="1708" height="978" alt="image" src="https://github.com/user-attachments/assets/99ad2eb4-0f67-4b9c-96cf-15880f463598" />
+
 
 ## Install
 
@@ -60,7 +66,7 @@ llmring leaderboard
 1. Run `llmring start`
 2. Select models from the top bar (click to cycle)
 3. Enter a prompt in the input box
-4. Press `Enter` to generate responses
+4. Press `Ctrl+E` to generate responses
 5. Vote (`A`/`B`) or mark tie (`G`/`D`)
 6. Continue with `N` (next) or `R` (regenerate)
 
@@ -68,7 +74,7 @@ llmring leaderboard
 
 | Key | Action |
 | --- | --- |
-| `Enter` | Send prompt |
+| `Ctrl+E` | Send prompt |
 | `Ctrl+Tab` | Cycle focus |
 | `A` / `B` | Vote for model |
 | `G` | Tie (good) |
