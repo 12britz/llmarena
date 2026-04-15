@@ -710,7 +710,7 @@ export async function main() {
     
     if (key.ctrl && key.name === 'c') process.exit(0);
     
-    if (key.ctrl && key.name === 'enter') {
+    if (key.name === 'enter') {
       generate();
       return false;
     }
@@ -759,7 +759,7 @@ export async function main() {
     height: 1,
     tags: true,
     style: { bg: C.bgTop, fg: C.textDim },
-    content: ` ${A.gray}Ctrl+E{/}  send   ${A.gray}Ctrl+Tab{/} focus   ${A.gray}[A/B]{/} vote   ${A.gray}[G]{/} tie-good   ${A.gray}[D]{/} tie-bad   ${A.gray}[R]{/} regen   ${A.gray}[N]{/} next   ${A.gray}Ctrl+C{/} quit`,
+    content: ` ${A.gray}Enter{/}  send   ${A.gray}Ctrl+Tab{/} focus   ${A.gray}[A/B]{/} vote   ${A.gray}[G]{/} tie-good   ${A.gray}[D]{/} tie-bad   ${A.gray}[R]{/} regen   ${A.gray}[N]{/} next   ${A.gray}Ctrl+C{/} quit`,
   });
 
   function refreshStatusBar() {
@@ -802,13 +802,7 @@ export async function main() {
     queueRender();
   });
 
-  // Ctrl+E to send, Ctrl+Tab to cycle focus
-  screen.key(['C-e'], () => {
-    if (!generating && inputField.getValue().trim()) {
-      generate();
-    }
-  });
-
+  // Ctrl+Tab to cycle focus
   screen.key(['C-Tab'], () => {
     if (!inBattleView) {
       activeFocus = 'composer';

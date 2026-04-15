@@ -60,7 +60,7 @@ llmring leaderboard
 1. Run `llmring start`
 2. Select models from the top bar (click to cycle)
 3. Enter a prompt in the input box
-4. Press `Ctrl+E` to generate responses
+4. Press `Enter` to generate responses
 5. Vote (`A`/`B`) or mark tie (`G`/`D`)
 6. Continue with `N` (next) or `R` (regenerate)
 
@@ -68,7 +68,7 @@ llmring leaderboard
 
 | Key | Action |
 | --- | --- |
-| `Ctrl+E` | Send prompt |
+| `Enter` | Send prompt |
 | `Ctrl+Tab` | Cycle focus |
 | `A` / `B` | Vote for model |
 | `G` | Tie (good) |
