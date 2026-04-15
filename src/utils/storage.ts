@@ -3,7 +3,7 @@ import * as path from 'path';
 import { Session, Vote, ModelElo, ArenaResult } from '../types';
 
 const HOME_DIR = process.env.HOME || process.env.USERPROFILE || '.';
-const DATA_DIR = path.join(HOME_DIR, '.llmarena');
+const DATA_DIR = path.join(HOME_DIR, '.llmring');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 const VOTES_FILE = path.join(DATA_DIR, 'votes.json');
 const ELO_FILE = path.join(DATA_DIR, 'elo.json');

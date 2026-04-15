@@ -1,10 +1,10 @@
 {
-  "name": "@12britz/llmarena",
+  "name": "@12britz/llmring",
   "version": "1.0.0",
-  "description": "Local LLM Arena - Compare local models side-by-side with blind evaluation and Elo rankings",
+  "description": "LLMRing - Compare local models side-by-side with blind evaluation and Elo rankings",
   "main": "dist/main.js",
   "bin": {
-    "llmarena": "./dist/main.js"
+    "llmring": "./dist/main.js"
   },
   "scripts": {
     "build": "tsc",

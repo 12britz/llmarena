@@ -9,8 +9,8 @@ import { listCommand } from './commands/list';
 const program = new Command();
 
 program
-  .name('llmarena')
-  .description(chalk.cyan('Local LLM Arena - Compare local models side-by-side'))
+  .name('llmring')
+  .description(chalk.cyan('LLMRing - Compare local models side-by-side'))
   .version('1.0.0');
 
 program
